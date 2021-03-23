@@ -39,7 +39,7 @@ S2EF_COUNTS = {
 
 
 def get_data(task, split, del_intmd_files):
-    datadir = os.path.join(os.path.dirname(ocpmodels.__path__[0]), "data")
+    datadir = os.path.join("/publicdata/ocp_dataset", "data")
     os.makedirs(datadir, exist_ok=True)
 
     if task == "s2ef" and split is None:
@@ -54,13 +54,14 @@ def get_data(task, split, del_intmd_files):
     elif task == "is2re":
         download_link = DOWNLOAD_LINKS[task]
 
-    os.system(f"wget {download_link}")
+    os.system(f"wget {download_link} --directory-prefix={datadir}")
     filename = os.path.basename(download_link)
-    print("Extracting contents...")
-    os.system(f"tar -xf {filename}")
+    filename = datadir+"/"+filename
+    os.system(f"tar -xf {filename} -C {datadir}")
     dirname = filename.split(".")[0]
+    print(dirname)
     if task == "s2ef" and split != "test":
-        compressed_dir = os.path.join(dirname, dirname)
+        compressed_dir = os.path.join(datadir, dirname)
         if split in ["200k", "2M", "20M", "all"]:
             output_path = os.path.join(datadir, task, split, "train")
         else:
