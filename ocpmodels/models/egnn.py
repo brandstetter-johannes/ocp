@@ -13,10 +13,11 @@ https://arxiv.org/abs/2102.09844
 
 import numpy as np
 import torch
+from collections import OrderedDict
 from torch import nn
 from torch_scatter import scatter
-from torch_geometric.nn.acts import swish
 from torch_geometric.nn import MessagePassing
+from torch_geometric.nn.inits import glorot_orthogonal
 
 from ocpmodels.common.registry import registry
 from ocpmodels.datasets.embeddings import CONTINUOUS_EMBEDDINGS
@@ -53,34 +54,35 @@ class EGNN_Layer(MessagePassing):
         Flag whether to update position.
     """
     def __init__(self, in_features, out_features, hidden_features, dim=3, update_pos=True):
-        super(EGNN_Layer, self).__init__(node_dim=-2)
+        super(EGNN_Layer, self).__init__(node_dim=-2, aggr='mean')
         self.update_pos = update_pos
         self.dim = dim
-        self.message_net = nn.Sequential(nn.Linear(2*in_features + 1, hidden_features),
-                                         SiLU(),
-                                         nn.Linear(hidden_features, hidden_features)
-                                         )
-        self.update_net = nn.Sequential(nn.Linear(in_features + hidden_features, hidden_features),
-                                        SiLU(),
-                                        nn.Linear(hidden_features, out_features)
-                                        )
+        self.message_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(2*in_features + 1, hidden_features)),
+                                                      ("act1", SiLU()),
+                                                      ("linear2", nn.Linear(hidden_features, out_features))
+                                                    ]))
+        self.update_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(in_features + hidden_features, hidden_features)),
+                                                     ("act1", SiLU()),
+                                                     ("linear2", nn.Linear(hidden_features, out_features))
+                                                    ]))
         if self.update_pos:
-            self.pos_net = nn.Sequential(nn.Linear(hidden_features, hidden_features),
-                                         SiLU(),
-                                         nn.Linear(hidden_features, dim)
-                                         )
+            self.pos_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(hidden_features, hidden_features)),
+                                                      ("act1", SiLU()),
+                                                      ("linear2", nn.Linear(hidden_features, dim))
+                                                    ]))
 
-    def forward(self, x, pos, edge_index):
+    def forward(self, x, pos, edge_index, cell_offsets):
         """ Propagate messages along edges """
-        x, pos = self.propagate(edge_index, x=x, pos=pos)
+        x, pos = self.propagate(edge_index, x=x, pos=pos, cell_offsets=cell_offsets)
         return x, pos
 
-    def message(self, x_i, x_j, pos_i, pos_j):
+    def message(self, x_i, x_j, pos_i, pos_j, cell_offsets):
         """ Message according to eqs 3-4 in the paper """
-        d = (pos_i - pos_j).pow(2).sum(-1, keepdims=True)
-        message = self.message_net(torch.cat((x_i, x_j, d), dim=-1))
+        distance_vectors = (pos_i - pos_j)+cell_offsets
+        distance = distance_vectors.sum(-1, keepdims=True)
+        message = self.message_net(torch.cat((x_i, x_j, distance), dim=-1))
         if self.update_pos:
-            pos_message = (pos_i - pos_j) * self.pos_net(message)
+            pos_message = distance_vectors * self.pos_net(message)
             # torch geometric does not support tuple outputs.
             message = torch.cat((pos_message, message), dim=-1)
         return message
@@ -105,7 +107,7 @@ class EGNN(torch.nn.Module):
         in_features,
         out_features,
         hidden_features,
-        hidden_layer=6,
+        hidden_layer=7,
         dim=3,
         update_pos=True,
         regress_forces=False,
@@ -173,14 +175,16 @@ class EGNN(torch.nn.Module):
             )
 
             edge_index = out["edge_index"]
+            cell_offsets = out["offsets"]
         else:
             edge_index = radius_graph(pos, r=self.cutoff, batch=batch)
+            raise NotImplementedError
 
         h = self.atom_map[data.atomic_numbers.long()]
 
         """ Propagate messages along edges """
         for i in range(self.hidden_layer):
-            h, pos = self.egnn[i](h, pos, edge_index)
+            h, pos = self.egnn[i](h, pos, edge_index, cell_offsets)
 
         return h, pos
 
@@ -190,7 +194,7 @@ class EGNN(torch.nn.Module):
 
     def forward(self, data):
         h, pos = self._forward(data)
-        out = scatter(h, data.batch, dim=0, reduce="add")
+        out = scatter(h, data.batch, dim=0, reduce="mean")
         energy = self.energy_mlp(out)
         return energy
 

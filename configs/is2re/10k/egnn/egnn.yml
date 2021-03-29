@@ -6,7 +6,7 @@ model:
   in_features: 9
   out_features: 256
   hidden_features: 256
-  hidden_layer: 6
+  hidden_layer: 7
   dim: 3
 
 optim:
