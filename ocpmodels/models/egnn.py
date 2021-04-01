@@ -39,6 +39,31 @@ class Swish_(nn.Module):
 
 SiLU = nn.SiLU if hasattr(nn, 'SiLU') else Swish_
 
+def try_gpu(i=0):  #@save
+    """Return gpu(i) if exists, otherwise return cpu()."""
+    if torch.cuda.device_count() >= i + 1:
+        return torch.device(f'cuda:{i}')
+    return torch.device('cpu')
+
+def add_phantom_atom(h, pos, edge_index, cell_offsets, batch):
+    # add features of phantom atom
+    h_suffix = scatter(h, batch, dim=0, reduce="mean")
+    h_new = torch.cat((h, h_suffix), 0)
+    # add position of phantom atom
+    pos_suffix = scatter(pos, batch, dim=0, reduce="mean")
+    pos_new = torch.cat((pos, pos_suffix), 0)
+    # add phantom atom to adjacency matrix, add (0,0,0) to cell_offsets
+    edge_i = torch.tensor([]).to(try_gpu())
+    edge_j = torch.arange(0, len(batch)).to(try_gpu())
+    for batch_nr in range(len(torch.unique(batch))):
+        edge_i = torch.cat((edge_i, torch.full(((torch.bincount(batch)[batch_nr]).item(),), (len(batch) + batch_nr)).to(try_gpu())),0)
+    suffix = torch.cat((torch.cat((edge_i, edge_j)), torch.cat((edge_j, edge_i)))).view(2,-1)
+    edge_index_new = torch.cat((edge_index, suffix), 1).type(torch.LongTensor).to(try_gpu())
+    suffix_cell_offsets = torch.zeros(len(batch)*2, 3).to(try_gpu())
+    cell_offsets_new = torch.cat((cell_offsets, suffix_cell_offsets), 0)
+
+    return h_new, pos_new, edge_index_new, cell_offsets_new
+
 
 class EGNN_Layer(MessagePassing):
     """E(N) equivariant message passing neural network layer.
@@ -57,19 +82,22 @@ class EGNN_Layer(MessagePassing):
         super(EGNN_Layer, self).__init__(node_dim=-2, aggr='mean')
         self.update_pos = update_pos
         self.dim = dim
-        self.message_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(2*in_features + 1, hidden_features)),
-                                                      ("act1", SiLU()),
-                                                      ("linear2", nn.Linear(hidden_features, out_features))
-                                                    ]))
-        self.update_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(in_features + hidden_features, hidden_features)),
-                                                     ("act1", SiLU()),
-                                                     ("linear2", nn.Linear(hidden_features, out_features))
-                                                    ]))
+        self.message_net = nn.Sequential(nn.Linear(2*in_features + 1, hidden_features),
+                                        SiLU(),
+                                        nn.BatchNorm1d(hidden_features),
+                                        nn.Linear(hidden_features, out_features),
+                                        )
+        self.update_net = nn.Sequential(nn.Linear(in_features + hidden_features, hidden_features),
+                                        SiLU(),
+                                        nn.Linear(hidden_features, hidden_features),
+                                        SiLU(),
+                                        nn.Linear(hidden_features, out_features)
+                                        )
         if self.update_pos:
-            self.pos_net = nn.Sequential(OrderedDict([("linear1", nn.Linear(hidden_features, hidden_features)),
-                                                      ("act1", SiLU()),
-                                                      ("linear2", nn.Linear(hidden_features, dim))
-                                                    ]))
+            self.pos_net = nn.Sequential(nn.Linear(hidden_features, hidden_features),
+                                        SiLU(),
+                                        nn.Linear(hidden_features, dim)
+                                        )
 
     def forward(self, x, pos, edge_index, cell_offsets):
         """ Propagate messages along edges """
@@ -93,7 +121,7 @@ class EGNN_Layer(MessagePassing):
             pos_message = message[:, :self.dim]
             message = message[:, self.dim:]
             pos += pos_message
-        x = self.update_net(torch.cat((x, message), dim=-1))
+        x += self.update_net(torch.cat((x, message), dim=-1))
         return x, pos
 
 
@@ -112,7 +140,7 @@ class EGNN(torch.nn.Module):
         update_pos=True,
         regress_forces=False,
         use_pbc=True,
-        otf_graph=False,
+        otf_graph=False
     ):
 
         super(EGNN, self).__init__()
@@ -127,13 +155,19 @@ class EGNN(torch.nn.Module):
         self.dim = dim
 
         self.egnn = torch.nn.ModuleList(modules=(EGNN_Layer(
-            self.in_features if _ == 0 else self.out_features, self.out_features, self.hidden_features
+            self.out_features if _ == 0 else self.out_features, self.out_features, self.hidden_features, update_pos=self.update_pos
         ) for _ in range(self.hidden_layer)))
 
         self.energy_mlp = nn.Sequential(nn.Linear(self.out_features, self.out_features),
                                         SiLU(),
+                                        nn.Linear(self.out_features, self.out_features),
+                                        SiLU(),
                                         nn.Linear(self.out_features, 1)
                                         )
+        self.embedding_mlp = nn.Sequential(nn.Linear(self.in_features, self.out_features),
+                                           SiLU(),
+                                           nn.Linear(self.out_features, self.out_features)
+                                           )
 
         # read atom map and atom radii
         atom_map = torch.zeros(101, 9)
@@ -182,21 +216,32 @@ class EGNN(torch.nn.Module):
 
         h = self.atom_map[data.atomic_numbers.long()]
 
-        """ Propagate messages along edges """
+        # add phantom atom with has average features and connections to all other atoms
+        h, pos, edge_index, cell_offsets = add_phantom_atom(h,
+                                                            pos,
+                                                            edge_index,
+                                                            cell_offsets,
+                                                            batch)
+
+        """ Propagate messages along edges and average over energies"""
+        h = self.embedding_mlp(h)
+        #out = scatter(h, data.batch, dim=0, reduce="mean")
+        #energy = self.energy_mlp(out)
         for i in range(self.hidden_layer):
             h, pos = self.egnn[i](h, pos, edge_index, cell_offsets)
+            #out = scatter(h, data.batch, dim=0, reduce="mean")]
+            #energy+=self.energy_mlp(out)
 
-        return h, pos
+        energy = self.energy_mlp(h[len(batch):])
+        return energy, energy
 
     @property
     def num_params(self):
         return sum(p.numel() for p in self.parameters())
 
     def forward(self, data):
-        h, pos = self._forward(data)
-        out = scatter(h, data.batch, dim=0, reduce="mean")
-        energy = self.energy_mlp(out)
-        return energy
+        energy, pos_loss = self._forward(data)
+        return energy, pos_loss
 
     @property
     def num_params(self):

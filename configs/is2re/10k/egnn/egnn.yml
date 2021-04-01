@@ -4,14 +4,15 @@ includes:
 model:
   name: egnn
   in_features: 9
-  out_features: 256
-  hidden_features: 256
+  out_features: 200
+  hidden_features: 200
   hidden_layer: 7
   dim: 3
+  update_pos: True
 
 optim:
-  batch_size: 2
-  eval_batch_size: 2
+  batch_size: 4
+  eval_batch_size: 4
   num_workers: 8
   lr_initial: 0.0001
   lr_gamma: 0.1
