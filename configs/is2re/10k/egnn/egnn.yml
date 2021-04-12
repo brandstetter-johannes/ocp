@@ -1,11 +1,12 @@
 includes:
 - configs/is2re/10k/base.yml
+#- configs/is2re/10k/base_wpos.yml
 
 model:
   name: egnn
   in_features: 9
-  out_features: 200
-  hidden_features: 200
+  out_features: 256
+  hidden_features: 256
   hidden_layer: 7
   dim: 3
   update_pos: True

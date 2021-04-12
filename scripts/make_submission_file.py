@@ -40,11 +40,11 @@ if __name__ == "__main__":
     submissions.
     """
 
-    id_path = "/path/to/id/results_file"
-    ood_ads_path = "/path/to/ood_ads/results_file"
-    ood_cat_path = "/path/to/ood_cat/results_file"
-    ood_both_path = "/path/to/ood_both/results_file"
+    id_path = "./results/2021-04-08-13-54-40/is2re_predictions.npz"
+    ood_ads_path = "./results/2021-04-08-13-56-48/is2re_predictions.npz"
+    ood_cat_path = "./results/2021-04-08-14-03-12/is2re_predictions.npz"
+    ood_both_path = "./results/2021-04-08-14-01-04/is2re_predictions.npz"
 
     paths = [id_path, ood_ads_path, ood_cat_path, ood_both_path]
 
-    main(paths, filename="TASKNAME_evalai_submission.npz")
+    main(paths, filename="IS2RE_evalai_submission.npz")

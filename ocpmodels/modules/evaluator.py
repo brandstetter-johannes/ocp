@@ -42,12 +42,14 @@ class Evaluator:
             "energy_force_within_threshold",
         ],
         "is2rs": ["average_distance_within_threshold"],
+        #"is2re": ["energy_mae", "energy_mse", "energy_within_threshold", "positions_mse"],
         "is2re": ["energy_mae", "energy_mse", "energy_within_threshold"],
     }
 
     task_attributes = {
         "s2ef": ["energy", "forces", "natoms"],
         "is2rs": ["positions", "cell", "pbc", "natoms"],
+        #"is2re": ["energy", "positions"],
         "is2re": ["energy"],
     }
 

@@ -20,8 +20,8 @@ from ocpmodels.modules.normalizer import Normalizer
 from ocpmodels.trainers.base_trainer import BaseTrainer
 
 
-@registry.register_trainer("energy")
-class EnergyTrainer(BaseTrainer):
+@registry.register_trainer("energy_position")
+class EnergyPositionTrainer(BaseTrainer):
     """
     Trainer class for the Initial Structure to Relaxed Energy (IS2RE) task.
 
@@ -93,7 +93,7 @@ class EnergyTrainer(BaseTrainer):
     def load_task(self):
         assert (
             self.config["task"]["dataset"] == "single_point_lmdb"
-        ), "EnergyTrainer requires single_point_lmdb dataset"
+        ), "EnergyPositionTrainer requires single_point_lmdb dataset"
 
         print("### Loading dataset: {}".format(self.config["task"]["dataset"]))
 
@@ -301,39 +301,51 @@ class EnergyTrainer(BaseTrainer):
             self.test_dataset.close_db()
 
     def _forward(self, batch_list):
-        output = self.model(batch_list)
+        energy, pos = self.model(batch_list)
 
-        if output.shape[-1] == 1:
-            output = output.view(-1)
+        if energy.shape[-1] == 1:
+            output = energy.view(-1)
 
         return {
             "energy": output,
+            "positions": pos
         }
 
     def _compute_loss(self, out, batch_list):
         energy_target = torch.cat(
             [batch.y_relaxed.to(self.device) for batch in batch_list], dim=0
         )
+        positions_target = torch.cat(
+            [batch.pos_relaxed.to(self.device) for batch in batch_list], dim=0
+        )
 
         if self.config["dataset"].get("normalize_labels", False):
-            target_normed = self.normalizers["target"].norm(energy_target)
-        else:
-            target_normed = energy_target
+            energy_target = self.normalizers["target"].norm(energy_target)
 
-        loss = self.criterion(out["energy"], target_normed)
-        return loss
+        loss_energy = self.criterion(out["energy"], energy_target)
+        loss_positions = 0.5 * torch.mean( (positions_target - out["positions"]) ** 2 )
+
+        return loss_energy+loss_positions
 
     def _compute_metrics(self, out, batch_list, evaluator, metrics={}):
         energy_target = torch.cat(
             [batch.y_relaxed.to(self.device) for batch in batch_list], dim=0
         )
+        positions_target = torch.cat(
+            [batch.pos_relaxed.to(self.device) for batch in batch_list], dim=0
+        )
 
         if self.config["dataset"].get("normalize_labels", False):
             out["energy"] = self.normalizers["target"].denorm(out["energy"])
 
+        target = {
+            "energy" : energy_target,
+            "positions" : positions_target
+        }
+
         metrics = evaluator.eval(
             out,
-            {"energy": energy_target},
+            target,
             prev_metrics=metrics,
         )
 
