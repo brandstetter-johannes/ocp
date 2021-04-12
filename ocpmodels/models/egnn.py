@@ -33,11 +33,14 @@ try:
 except ImportError:
     sym = None
 
-class Swish_(nn.Module):
-    def forward(self, x):
-        return x * x.sigmoid()
+class Swish(nn.Module):
+    def __init__(self, beta=1):
+        super(Swish, self).__init__()
+        self.beta = beta
 
-SiLU = nn.SiLU if hasattr(nn, 'SiLU') else Swish_
+    def forward(self, x):
+        return x * torch.sigmoid(self.beta*x)
+
 
 def try_gpu(i=0):  #@save
     """Return gpu(i) if exists, otherwise return cpu()."""
@@ -97,20 +100,20 @@ class EGNN_Layer(MessagePassing):
 
         self.ln = nn.LayerNorm(hidden_features)
         self.message_net = nn.Sequential(nn.Linear(2*in_features + 1, hidden_features),
-                                        SiLU(),
+                                        Swish(),
                                         nn.BatchNorm1d(hidden_features), #new
                                         nn.Linear(hidden_features, out_features),
-                                        SiLU() #new
+                                        Swish() #new
                                         )
         self.update_net = nn.Sequential(nn.Linear(in_features + hidden_features, hidden_features),
-                                        SiLU(),
+                                        Swish(),
                                         nn.Linear(hidden_features, out_features),
-                                        SiLU() #new
+                                        Swish() #new
                                         )
         if self.update_pos:
             self.pos_net = nn.Sequential(nn.Linear(hidden_features, hidden_features),
-                                        SiLU(),
-                                        nn.Linear(hidden_features, dim)
+                                        Swish(),
+                                        nn.Linear(hidden_features, 1)
                                         )
 
     def forward(self, x, pos, edge_index, cell_offsets, tags):
@@ -121,7 +124,7 @@ class EGNN_Layer(MessagePassing):
     def message(self, x_i, x_j, pos_i, pos_j, cell_offsets):
         """ Message according to eqs 3-4 in the paper """
         distance_vectors = (pos_i - pos_j)+cell_offsets
-        distance = distance_vectors.pow(2).sum(-1, keepdims=True).sqrt()
+        distance = distance_vectors.pow(2).sum(-1, keepdims=True)
         message = self.message_net(torch.cat((x_i, x_j, distance), dim=-1))
         if self.update_pos:
             pos_message = distance_vectors * self.pos_net(message)
@@ -148,9 +151,9 @@ class Energy_Layer(nn.Module):
         self.hidden_features = in_features
 
         self.energy_net = nn.Sequential(nn.Linear(self.in_features, self.hidden_features),
-                                        SiLU(),
+                                        Swish(),
                                         nn.Linear(self.hidden_features, 1),
-                                        SiLU()
+                                        Swish()
                                         )
     def forward(self, x):
             return self.energy_net(x)
@@ -194,9 +197,9 @@ class EGNN(torch.nn.Module):
         #) for _ in range(self.hidden_layer)))
 
         self.energy_mlp = nn.Sequential(nn.Linear(self.out_features, 512),
-                                        SiLU(),
+                                        Swish(),
                                         nn.Linear(512, 128),
-                                        SiLU(),
+                                        Swish(),
                                         nn.Linear(128, 1)
                                         )
 
