@@ -144,21 +144,7 @@ class EGNN_Layer(MessagePassing):
         #x = self.ln(update) + x
         return x, pos
 
-class Energy_Layer(nn.Module):
-    def __init__(self, in_features):
-        super(Energy_Layer, self).__init__()
-        self.in_features = in_features
-        self.hidden_features = in_features
-
-        self.energy_net = nn.Sequential(nn.Linear(self.in_features, self.hidden_features),
-                                        Swish(),
-                                        nn.Linear(self.hidden_features, 1),
-                                        Swish()
-                                        )
-    def forward(self, x):
-            return self.energy_net(x)
-
-
+    
 @registry.register_model("egnn")
 class EGNN(torch.nn.Module):
     def __init__(
