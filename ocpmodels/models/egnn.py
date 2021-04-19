@@ -16,7 +16,7 @@ import torch
 from collections import OrderedDict
 from torch import nn
 from torch_scatter import scatter
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, InstanceNorm
 from torch_geometric.nn.inits import glorot_orthogonal
 
 from ocpmodels.common.registry import registry
@@ -48,6 +48,72 @@ def try_gpu(i=0):  #@save
         return torch.device(f'cuda:{i}')
     return torch.device('cpu')
 
+def add_phantom_atoms(h, pos, edge_index, cell_offsets, tags, batch):
+    nr_batches = len(torch.unique(batch))
+    # add features and positions of phantom atoms
+    h_new = h.clone()
+    pos_new = pos.clone()
+    for b in range(nr_batches):
+        h_add = scatter(h[batch == b], tags[batch == b], dim=0, reduce="mean")
+        h_new = torch.cat((h_new, h_add), 0)
+        pos_add = scatter(pos[batch == b], tags[batch == b], dim=0, reduce="mean")
+        pos_new = torch.cat((pos_new, pos_add), 0)
+    # add aggregating nodes at end
+    for b in range(nr_batches):
+        h_add = scatter(h[batch == b], tags[batch == b], dim=0, reduce="mean")
+        h_agg = h_add.mean(0)[None, :]
+        h_new = torch.cat((h_new, h_agg), 0)
+        pos_add = scatter(pos[batch == b], tags[batch == b], dim=0, reduce="mean")
+        pos_agg = pos_add.mean(0)[None, :]
+        pos_new = torch.cat((pos_new, pos_agg), 0)
+    # initialize new edges
+    edge_i = edge_index.new_zeros((0,))
+    edge_j = edge_index.new_tensor(np.arange(0, len(batch)))
+    # help counter for phantom atoms and aggregating phantom atoms
+    ac = 0
+    ag = 0
+    for b in range(nr_batches):
+        # categories in one batch
+        n0 = (torch.bincount(tags[batch == b])[0]).item()
+        n1 = (torch.bincount(tags[batch == b])[1]).item()
+        n2 = (torch.bincount(tags[batch == b])[2]).item()
+        # add indices of new phantom atoms
+        ex0 = edge_index.new_tensor(np.full((n0,), (len(batch) + ac)))
+        ex1 = edge_index.new_tensor(np.full((n1,), (len(batch) + ac + 1)))
+        ex2 = edge_index.new_tensor(np.full((n2,), (len(batch) + ac + 2)))
+        # concate new edges
+        edge_i = torch.cat((edge_i, ex0, ex1, ex2), 0)
+        # raise help counter
+        ac += 3
+    # add edges of aggregating atom
+    for b in range(nr_batches):
+        ex_agg = edge_index.new_tensor(np.full((3,), (len(batch) + ac)))
+        p = edge_index.new_tensor(
+            np.array([len(batch) + ag, len(batch) + ag + 1, len(batch) + ag + 2]))
+        # concate aggregating edges
+        edge_i = torch.cat((edge_i, ex_agg), 0)
+        edge_j = torch.cat((edge_j, p), 0)
+        # raise help counters
+        ac += 1
+        ag += 3
+    # add new edges to adjacency
+    suffix = torch.cat((torch.cat((edge_i, edge_j)), torch.cat((edge_j, edge_i)))).view(2, -1)
+    edge_index_new = edge_index.clone()
+    edge_index_new = torch.cat((edge_index_new, suffix), 1)
+    # add 0 cell offsets for phantom atoms and aggregating atoms
+    suffix_cell_offsets = cell_offsets.new_tensor(np.zeros((len(batch) * 2 + nr_batches * 6, 3)))
+    cell_offsets_new = torch.cat((cell_offsets, suffix_cell_offsets), 0)
+    # add tag==2 to all phantom atoms and aggregating atoms
+    suffix_tags = tags.new_tensor(np.full((nr_batches * 4,), 2))
+    tags_new = torch.cat((tags, suffix_tags), 0)
+    # only adsorbat atoms and phantom atoms are allowed to move
+    tags_new[tags_new != 2] = 0
+    tags_new[tags_new == 2] = 1
+    tags_new = tags_new[:, None]
+
+    return h_new, pos_new, edge_index_new, cell_offsets_new, tags_new
+
+
 def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch):
     # add features of phantom atom
     h_suffix = scatter(h, batch, dim=0, reduce="mean")
@@ -56,28 +122,33 @@ def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch):
     pos_suffix = scatter(pos, batch, dim=0, reduce="mean")
     pos_new = torch.cat((pos, pos_suffix), 0)
     # add phantom atom to adjacency matrix, add (0,0,0) to cell_offsets
-    edge_i = torch.tensor([]).to(try_gpu())
-    edge_j = torch.arange(0, len(batch)).to(try_gpu())
+    edge_i = edge_index.new_zeros((0,))
+    edge_j = edge_index.new_tensor(np.arange(0, len(batch)))
     nr_batches = len(torch.unique(batch))
     for batch_nr in range(nr_batches):
         # count entries of the same number in batch
         nr_entries = (torch.bincount(batch)[batch_nr]).item()
         # add nr_entries times new number (phantom atom) for each batch
-        edge_i = torch.cat((edge_i, torch.full((nr_entries,), (len(batch) + batch_nr)).to(try_gpu())),0)
+        bi = edge_index.new_tensor(np.full((nr_entries,), (len(batch) + batch_nr)))
+        edge_i = torch.cat((edge_i, bi), 0)
     suffix = torch.cat((torch.cat((edge_i, edge_j)), torch.cat((edge_j, edge_i)))).view(2,-1)
     # connections of phantom add to all atoms and from all atoms
-    edge_index_new = torch.cat((edge_index, suffix), 1).type(torch.LongTensor).to(try_gpu())
+    edge_index_new = edge_index.clone()
+    edge_index_new = torch.cat((edge_index_new, suffix), 1)
     # add cell offsets
-    suffix_cell_offsets = torch.zeros(len(batch)*2, 3).to(try_gpu())
+    suffix_cell_offsets = cell_offsets.new_tensor(np.zeros((len(batch) * 2, 3)))
     cell_offsets_new = torch.cat((cell_offsets, suffix_cell_offsets), 0)
     # update tags (if atom is allowed to move) -> we only want adsorbat atoms to move
-    suffix_tags = torch.full((nr_batches,), 2).to(try_gpu())
+    suffix_tags = tags.new_tensor(np.full((nr_batches,), 2))
     tags_new = torch.cat((tags, suffix_tags), 0)
     tags_new[tags_new != 2] = 0
     tags_new[tags_new == 2] = 1
     tags_new = tags_new[:, None]
+    # update batch indices for phantom atom
+    suffix_batch = batch.new_tensor(np.arange(0, nr_batches))
+    batch_new = torch.cat((batch, suffix_batch), 0)
 
-    return h_new, pos_new, edge_index_new, cell_offsets_new, tags_new
+    return h_new, pos_new, edge_index_new, cell_offsets_new, tags_new, batch_new
 
 
 class EGNN_Layer(MessagePassing):
@@ -93,12 +164,13 @@ class EGNN_Layer(MessagePassing):
     update_pos : bool
         Flag whether to update position.
     """
-    def __init__(self, in_features, out_features, hidden_features, dim=3, update_pos=True):
+    def __init__(self, in_features, out_features, hidden_features, dim=3, update_pos=True, infer_edges=True):
         super(EGNN_Layer, self).__init__(node_dim=-2, aggr='mean')
         self.update_pos = update_pos
+        self.infer_edges = infer_edges
         self.dim = dim
 
-        self.ln = nn.LayerNorm(hidden_features)
+        #self.ln = nn.LayerNorm(hidden_features)
         self.message_net = nn.Sequential(nn.Linear(2*in_features + 1, hidden_features),
                                         Swish(),
                                         nn.BatchNorm1d(hidden_features), #new
@@ -115,10 +187,17 @@ class EGNN_Layer(MessagePassing):
                                         Swish(),
                                         nn.Linear(hidden_features, 1)
                                         )
+        if self.infer_edges:
+            self.inf_net = nn.Sequential(nn.Linear(hidden_features, 1),
+                                         nn.Sigmoid()
+                                         )
 
-    def forward(self, x, pos, edge_index, cell_offsets, tags):
+        self.norm = InstanceNorm(hidden_features)
+
+    def forward(self, x, pos, edge_index, cell_offsets, tags, batch):
         """ Propagate messages along edges """
         x, pos = self.propagate(edge_index, x=x, pos=pos, cell_offsets=cell_offsets, tags=tags)
+        x = self.norm(x, batch) # new
         return x, pos
 
     def message(self, x_i, x_j, pos_i, pos_j, cell_offsets):
@@ -126,6 +205,10 @@ class EGNN_Layer(MessagePassing):
         distance_vectors = (pos_i - pos_j)+cell_offsets
         distance = distance_vectors.pow(2).sum(-1, keepdims=True)
         message = self.message_net(torch.cat((x_i, x_j, distance), dim=-1))
+
+        if self.infer_edges:
+            message = self.inf_net(message)*message
+
         if self.update_pos:
             pos_message = distance_vectors * self.pos_net(message)
             # torch geometric does not support tuple outputs.
@@ -140,8 +223,8 @@ class EGNN_Layer(MessagePassing):
             pos += pos_message*tags
         #x += self.update_net(torch.cat((x, message), dim=-1))
         update = self.update_net(torch.cat((x, message), dim=-1)) #new
-        x = torch.nn.functional.softplus(self.ln(update) + x) #new
-        #x = self.ln(update) + x
+        x += update
+        #x = torch.nn.functional.softplus(self.ln(update) + x) #new
         return x, pos
 
     
@@ -241,19 +324,27 @@ class EGNN(torch.nn.Module):
         h = self.atom_map[data.atomic_numbers.long()]
 
         # add phantom atom with has average features and connections to all other atoms
-        h, pos, edge_index, cell_offsets, tags = add_phantom_atom(h,
-                                                            pos,
-                                                            edge_index,
-                                                            cell_offsets,
-                                                            data.tags,
-                                                            batch)
+        h, pos, edge_index, cell_offsets, tags, batch_new = add_phantom_atom(h,
+                                                                        pos,
+                                                                        edge_index,
+                                                                        cell_offsets,
+                                                                        data.tags,
+                                                                        batch)
 
         """ Propagate messages along edges and average over energies"""
         h = self.embedding_mlp(h)
         for i in range(self.hidden_layer):
-            h, pos = self.egnn[i](h, pos, edge_index, cell_offsets, tags)
+            h, pos = self.egnn[i](h, pos, edge_index, cell_offsets, tags, batch_new)
 
         energy = self.energy_mlp(h[len(batch):])
+        #nr_batches = len(torch.unique(batch))
+        #energy = self.energy_mlp(h[len(batch) + 3 * nr_batches:])
+        #out = torch.cat((h[len(batch):len(batch) + 1 * nr_batches],
+        #                 h[len(batch) + 1 * nr_batches:len(batch) + 2 * nr_batches],
+        #                 h[len(batch) + 2 * nr_batches:len(batch) + 3 * nr_batches],
+        #                 h[len(batch) + 3 * nr_batches:]), 1)
+
+        #energy = self.energy_mlp(out)
         return energy
 
     @property

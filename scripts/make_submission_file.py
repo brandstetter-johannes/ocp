@@ -40,10 +40,10 @@ if __name__ == "__main__":
     submissions.
     """
 
-    id_path = "./results/2021-04-08-13-54-40/is2re_predictions.npz"
-    ood_ads_path = "./results/2021-04-08-13-56-48/is2re_predictions.npz"
-    ood_cat_path = "./results/2021-04-08-14-03-12/is2re_predictions.npz"
-    ood_both_path = "./results/2021-04-08-14-01-04/is2re_predictions.npz"
+    id_path = "./results/2021-04-15-09-25-52/is2re_predictions.npz"
+    ood_ads_path = "./results/2021-04-15-09-30-08/is2re_predictions.npz"
+    ood_cat_path = "./results/2021-04-15-09-32-16/is2re_predictions.npz"
+    ood_both_path = "./results/2021-04-15-09-34-24/is2re_predictions.npz"
 
     paths = [id_path, ood_ads_path, ood_cat_path, ood_both_path]
 
