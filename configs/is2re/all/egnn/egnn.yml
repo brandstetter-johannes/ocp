@@ -3,7 +3,8 @@ includes:
 #- configs/is2re/all/base_wpos.yml
 
 model:
-  name: egnn
+  #name: egnn
+  name: egnn2
   in_features: 9
   out_features: 256
   hidden_features: 256
@@ -21,6 +22,6 @@ optim:
     - 10
     - 14
     - 18
-  warmup_epochs: 2
+  warmup_epochs: 1
   warmup_factor: 0.2
   max_epochs: 20

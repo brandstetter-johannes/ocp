@@ -1,9 +1,6 @@
 """
 E (n) Equivariant Graph Neural Networks
 
-Author: Johannes Brandstetter, Rob Hesselink
----
-
 This code implements the paper
 E (n) Equivariant Graph Neural Networks
 by Victor Garcia Satorras, Emiel Hoogeboom, Max Welling
@@ -41,13 +38,7 @@ class Swish(nn.Module):
     def forward(self, x):
         return x * torch.sigmoid(self.beta*x)
 
-
-def try_gpu(i=0):  #@save
-    """Return gpu(i) if exists, otherwise return cpu()."""
-    if torch.cuda.device_count() >= i + 1:
-        return torch.device(f'cuda:{i}')
-    return torch.device('cpu')
-
+"""
 def add_phantom_atoms(h, pos, edge_index, cell_offsets, tags, batch):
     nr_batches = len(torch.unique(batch))
     # add features and positions of phantom atoms
@@ -112,9 +103,9 @@ def add_phantom_atoms(h, pos, edge_index, cell_offsets, tags, batch):
     tags_new = tags_new[:, None]
 
     return h_new, pos_new, edge_index_new, cell_offsets_new, tags_new
+"""
 
-
-def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch):
+def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch, nr_graphs):
     # add features of phantom atom
     h_suffix = scatter(h, batch, dim=0, reduce="mean")
     h_new = torch.cat((h, h_suffix), 0)
@@ -124,12 +115,11 @@ def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch):
     # add phantom atom to adjacency matrix, add (0,0,0) to cell_offsets
     edge_i = edge_index.new_zeros((0,))
     edge_j = edge_index.new_tensor(np.arange(0, len(batch)))
-    nr_batches = len(torch.unique(batch))
-    for batch_nr in range(nr_batches):
+    for graph in range(nr_graphs):
         # count entries of the same number in batch
-        nr_entries = (torch.bincount(batch)[batch_nr]).item()
+        nr_entries = (torch.bincount(batch)[graph]).item()
         # add nr_entries times new number (phantom atom) for each batch
-        bi = edge_index.new_tensor(np.full((nr_entries,), (len(batch) + batch_nr)))
+        bi = edge_index.new_tensor(np.full((nr_entries,), (len(batch) + graph)))
         edge_i = torch.cat((edge_i, bi), 0)
     suffix = torch.cat((torch.cat((edge_i, edge_j)), torch.cat((edge_j, edge_i)))).view(2,-1)
     # connections of phantom add to all atoms and from all atoms
@@ -139,13 +129,13 @@ def add_phantom_atom(h, pos, edge_index, cell_offsets, tags, batch):
     suffix_cell_offsets = cell_offsets.new_tensor(np.zeros((len(batch) * 2, 3)))
     cell_offsets_new = torch.cat((cell_offsets, suffix_cell_offsets), 0)
     # update tags (if atom is allowed to move) -> we only want adsorbat atoms to move
-    suffix_tags = tags.new_tensor(np.full((nr_batches,), 2))
+    suffix_tags = tags.new_tensor(np.full((nr_graphs,), 2))
     tags_new = torch.cat((tags, suffix_tags), 0)
     tags_new[tags_new != 2] = 0
     tags_new[tags_new == 2] = 1
     tags_new = tags_new[:, None]
     # update batch indices for phantom atom
-    suffix_batch = batch.new_tensor(np.arange(0, nr_batches))
+    suffix_batch = batch.new_tensor(np.arange(0, nr_graphs))
     batch_new = torch.cat((batch, suffix_batch), 0)
 
     return h_new, pos_new, edge_index_new, cell_offsets_new, tags_new, batch_new
@@ -329,7 +319,8 @@ class EGNN(torch.nn.Module):
                                                                         edge_index,
                                                                         cell_offsets,
                                                                         data.tags,
-                                                                        batch)
+                                                                        batch,
+                                                                        data.num_graphs)
 
         """ Propagate messages along edges and average over energies"""
         h = self.embedding_mlp(h)
@@ -337,6 +328,7 @@ class EGNN(torch.nn.Module):
             h, pos = self.egnn[i](h, pos, edge_index, cell_offsets, tags, batch_new)
 
         energy = self.energy_mlp(h[len(batch):])
+        return energy
         #nr_batches = len(torch.unique(batch))
         #energy = self.energy_mlp(h[len(batch) + 3 * nr_batches:])
         #out = torch.cat((h[len(batch):len(batch) + 1 * nr_batches],
@@ -345,7 +337,6 @@ class EGNN(torch.nn.Module):
         #                 h[len(batch) + 3 * nr_batches:]), 1)
 
         #energy = self.energy_mlp(out)
-        return energy
 
     @property
     def num_params(self):
