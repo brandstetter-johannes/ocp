@@ -207,14 +207,11 @@ class EGNN_Layer(MessagePassing):
 
     def update(self, message, x, pos, tags):
         """ Update according to eq 6 in the paper """
-        pos_message = message[:, :self.dim]
-        message = message[:, self.dim:]
         if self.update_pos:
+            pos_message = message[:, :self.dim]
+            message = message[:, self.dim:]
             pos += pos_message*tags
-        #x += self.update_net(torch.cat((x, message), dim=-1))
-        update = self.update_net(torch.cat((x, message), dim=-1)) #new
-        x += update
-        #x = torch.nn.functional.softplus(self.ln(update) + x) #new
+        x += self.update_net(torch.cat((x, message), dim=-1))
         return x, pos
 
     
