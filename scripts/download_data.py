@@ -56,12 +56,12 @@ def get_data(task, split, del_intmd_files):
 
     os.system(f"wget {download_link} --directory-prefix={datadir}")
     filename = os.path.basename(download_link)
-    filename = datadir+"/"+filename
+    filename = os.path.join(datadir, filename)
     os.system(f"tar -xf {filename} -C {datadir}")
     dirname = filename.split(".")[0]
-    print(dirname)
+    subdirname = filename.split(".")[0].split("/")[-1]
     if task == "s2ef" and split != "test":
-        compressed_dir = os.path.join(datadir, dirname)
+        compressed_dir = os.path.join(datadir, subdirname, subdirname)
         if split in ["200k", "2M", "20M", "all"]:
             output_path = os.path.join(datadir, task, split, "train")
         else:

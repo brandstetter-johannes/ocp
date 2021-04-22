@@ -10,7 +10,7 @@ model:
   hidden_features: 256
   hidden_layer: 7
   dim: 3
-  update_pos: False
+  update_pos: True
 
 optim:
   batch_size: 16
