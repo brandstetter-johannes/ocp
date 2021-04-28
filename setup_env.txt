@@ -17,7 +17,6 @@ pip install pyyaml
 pip install demjson
 pip install submitit
 pip install tensorboard
-pip install e3nn
 
 
 # running on multiple GPUs
@@ -27,7 +26,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m torch.distributed.launch --nproc_per_n
 CUDA_VISIBLE_DEVICES=0 python main.py --config-yml configs/is2re/all/segnn/segnn.yml
 
 # config file
-configs/is2re/all/seqgnn/segnn.yml
+configs/is2re/all/segnn/segnn.yml
+configs/is2re/all/all /base.yml #to change the filepath 
 
 # model
 ocpmodels/models/segnn2.py
