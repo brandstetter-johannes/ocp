@@ -397,7 +397,7 @@ class SEGNNModel(torch.nn.Module):
         h = self.atom_map[data.atomic_numbers.long()]
         h = self.embedding(h)
         for layer in self.layers:
-            h, pos  = layer(h, pos, edge_index, cell_offsets)
+            h, pos = layer(h, pos, edge_index, cell_offsets)
         # Output heads
         h = self.head_pre_pool(h)
         h = global_mean_pool(h, batch)

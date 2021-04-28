@@ -73,6 +73,8 @@ class SEGNN(MessagePassing):
             self.pos_update_layer_1 = None  # O3TensorProductSwishGate
             self.pos_update_layer_2 = None  # O3TensorProduct
 
+        # self.norm = BatchNorm(node_out_irreps)
+
 
     def forward(self, x, pos, edge_index, edge_dist, edge_attr, node_attr):
         """ Propagate messages along edges """
@@ -429,7 +431,8 @@ class SEGNNModel(torch.nn.Module):
         node_attr = self.node_attribute_net(edge_index, edge_attr)
         if (data.contains_isolated_nodes() and edge_index.max().item() + 1 != data.num_nodes):
             nr_add_attr = data.num_nodes - (edge_index.max().item() + 1)
-            add_attr = node_attr.new_tensor(np.zeros((nr_add_attr, node_attr.shape[-1])))
+            add_attr = node_attr.new_tensor(np.tile(np.eye(node_attr_shape[-1])[0,:], (nr_add_attr,1)))
+            #add_attr = node_attr.new_tensor(np.zeros((nr_add_attr, node_attr.shape[-1])))
             node_attr = torch.cat((node_attr, add_attr), -2)
 
         # node_attr, edge_attr = self.attribute_net(pos, edge_index)

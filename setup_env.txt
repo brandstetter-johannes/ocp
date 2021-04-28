@@ -1,0 +1,33 @@
+# setting up environment
+conda create --yes --name ocp-e3nn-env python=3.6 numpy scipy matplotlib scikit-learn
+conda activate ocp-e3nn-env
+conda install pytorch torchvision torchaudio cudatoolkit=11.1 -c pytorch -c conda-forge -y
+
+pip install torch-scatter -f https://pytorch-geometric.com/whl/torch-1.8.0+cu111.html
+pip install torch-sparse -f https://pytorch-geometric.com/whl/torch-1.8.0+cu111.html
+pip install torch-cluster -f https://pytorch-geometric.com/whl/torch-1.8.0+cu111.html
+pip install torch-spline-conv -f https://pytorch-geometric.com/whl/torch-1.8.0+cu111.html
+pip install torch-geometric
+pip install e3nn
+
+pip install pymatgen
+pip install lmdb
+pip install wandb
+pip install pyyaml
+pip install demjson
+pip install submitit
+pip install tensorboard
+pip install e3nn
+
+
+# running on multiple GPUs
+CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m torch.distributed.launch --nproc_per_node=4 main.py --distributed --num-gpus 4 --mode train --config-yml configs/is2re/all/segnn/segnn.yml
+
+# running on one GPU
+CUDA_VISIBLE_DEVICES=0 python main.py --config-yml configs/is2re/all/segnn/segnn.yml
+
+# config file
+configs/is2re/all/seqgnn/segnn.yml
+
+# model
+ocpmodels/models/segnn2.py
