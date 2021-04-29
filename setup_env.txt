@@ -27,7 +27,7 @@ CUDA_VISIBLE_DEVICES=0 python main.py --config-yml configs/is2re/all/segnn/segnn
 
 # config file
 configs/is2re/all/segnn/segnn.yml
-configs/is2re/all/all /base.yml #to change the filepath 
+configs/is2re/all/all /base.yml #to change the filepath
 
 # model
 ocpmodels/models/segnn2.py
