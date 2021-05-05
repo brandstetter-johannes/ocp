@@ -152,6 +152,7 @@ def BalancedIrreps(lmax, vec_dim, sh_type = True):
         str_out += ' + '
     str_out = str_out[:-3]
     # Generate the irrep
+    print('Determined irrep type:', str_out)
     return Irreps(str_out)
 
 def WeightBalancedIrreps(irreps_in1_scalar, irreps_in2, sh = True):
@@ -335,7 +336,7 @@ class SEGNNModel(torch.nn.Module):
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
-        #node_hidden_irreps = BalancedIrreps(self.lmax_h, self.hidden_features)  # This is the type on the hidden reps
+        node_hidden_irreps = BalancedIrreps(self.lmax_h, self.hidden_features)  # This is the type on the hidden reps
         node_hidden_irreps_scalar = Irreps("{0}x0e".format(self.hidden_features))  # For the output layers
         node_out_irreps_scalar = Irreps("{0}x0e".format(self.out_features))  # This is the type on the output
 
@@ -343,7 +344,7 @@ class SEGNNModel(torch.nn.Module):
         attr_irreps = Irreps.spherical_harmonics(self.lmax_pos)
         self.attr_irreps = attr_irreps
 
-        node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, True)  # True: copies of sh
+        #node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, True)  # True: copies of sh
 
         # Network for computing the node attributes
         self.node_attribute_net = NodeAttributeNetwork()
