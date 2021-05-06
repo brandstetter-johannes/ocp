@@ -7,11 +7,11 @@ model:
   name: segnn2
   in_features: 9
   out_features: 1
-  hidden_features: 512
-  N: 5
+  hidden_features: 256
+  N: 7
   dim: 3
-  lmax_h: 2
-  lmax_pos: 2
+  lmax_h: 1
+  lmax_pos: 1
   update_pos: False
   recurrent: True
 
