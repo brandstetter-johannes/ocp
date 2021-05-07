@@ -73,21 +73,21 @@ class SEGNN(MessagePassing):
             self.pos_update_layer_1 = None  # O3TensorProductSwishGate
             self.pos_update_layer_2 = None  # O3TensorProduct
 
-        self.feature_norm = BatchNorm(node_out_irreps)
-        self.message_norm = BatchNorm(node_out_irreps)
+        # self.feature_norm = BatchNorm(node_out_irreps)
+        # self.message_norm = BatchNorm(node_out_irreps)
 
 
     def forward(self, x, pos, edge_index, edge_dist, edge_attr, node_attr):
         """ Propagate messages along edges """
         x, pos = self.propagate(edge_index, x=x, pos=pos, edge_dist=edge_dist, node_attr=node_attr, edge_attr=edge_attr) # TODO: continue here!
-        x = self.feature_norm(x)
+        # x = self.feature_norm(x)
         return x, pos
 
     def message(self, x_i, x_j, edge_dist, edge_attr):
         """ Message according to eqs 3-4 in the paper """
         message = self.message_layer_1(torch.cat((x_i, x_j, edge_dist), dim=-1), edge_attr)
         message = self.message_layer_2(message, edge_attr)
-        message = self.message_norm(message)
+        # message = self.message_norm(message)
         if self.update_pos:
             pos_message = None
         return message
@@ -354,7 +354,10 @@ class SEGNNModel(torch.nn.Module):
         self.embedding_layer_1 = O3TensorProductSwishGate(node_in_irreps_scalar,  # in
                                                           node_hidden_irreps,  # out
                                                           attr_irreps)  # steerable attribute
-        self.embedding_layer_2 = O3TensorProduct(node_hidden_irreps,  # in
+        self.embedding_layer_2 = O3TensorProductSwishGate(node_hidden_irreps,  # in
+                                                          node_hidden_irreps,  # out
+                                                          attr_irreps)  # steerable attribute
+        self.embedding_layer_3 = O3TensorProduct(node_hidden_irreps,  # in
                                                  node_hidden_irreps,  # out
                                                  attr_irreps)  # steerable attribute
 
