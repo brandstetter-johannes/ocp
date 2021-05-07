@@ -444,6 +444,7 @@ class SEGNNModel(torch.nn.Module):
         x = self.atom_map[data.atomic_numbers.long()]
         x = self.embedding_layer_1(x, node_attr)
         x = self.embedding_layer_2(x, node_attr)
+        x = self.embedding_layer_3(x, node_attr)
 
         # The main layers
         for layer in self.layers:
