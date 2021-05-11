@@ -4,14 +4,14 @@ includes:
 
 model:
 #  name: segnn
-  name: segnn3
+  name: segnn2
   in_features: 9
   out_features: 1
   hidden_features: 256
   N: 5
   dim: 3
   lmax_h: 1
-  lmax_pos: 1
+  lmax_pos: 3
   update_pos: False
   recurrent: True
 

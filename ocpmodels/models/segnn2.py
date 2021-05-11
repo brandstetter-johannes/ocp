@@ -156,7 +156,7 @@ def BalancedIrreps(lmax, vec_dim, sh_type = True):
     #print('Determined irrep type:', str_out)
     return Irreps(str_out)
 
-def WeightBalancedIrreps(irreps_in1_scalar, irreps_in2, sh = True):
+def WeightBalancedIrreps(irreps_in1_scalar, irreps_in2, sh = True, lmax=None):
     """
     Determines an irreps_in1 type of order irreps_in2.lmax that when used in a tensor product
     irreps_in1 x irreps_in2 -> irreps_in1
@@ -164,7 +164,8 @@ def WeightBalancedIrreps(irreps_in1_scalar, irreps_in2, sh = True):
     irreps_in1_scalar x "1x0e" -> irreps_in1_scaler
     """
     n = 1
-    lmax = irreps_in2.lmax
+    if (lmax == None):
+        lmax = irreps_in2.lmax
     irreps_in1 = (Irreps.spherical_harmonics(lmax) * n).sort().irreps.simplify() if sh else BalancedIrreps(lmax, n)
     weight_numel1 = FullyConnectedTensorProduct(irreps_in1, irreps_in2, irreps_in1).weight_numel
     weight_numel_scalar = FullyConnectedTensorProduct(irreps_in1_scalar, Irreps("1x0e"), irreps_in1_scalar).weight_numel
@@ -313,7 +314,7 @@ class SEGNNModel(torch.nn.Module):
         N=7,
         dim=3,
         lmax_h=2,
-        lmax_pos=2,
+        lmax_pos=None,
         update_pos=False,
         recurrent=True,
         regress_forces=False,
@@ -334,6 +335,8 @@ class SEGNNModel(torch.nn.Module):
         self.dim = dim
         self.lmax_h = lmax_h
         self.lmax_pos = lmax_pos
+        if(lmax_pos == None):
+            self.lmax_pos = self.lmax_h
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
@@ -344,8 +347,9 @@ class SEGNNModel(torch.nn.Module):
         # Irreps for the edge and node attributes
         attr_irreps = Irreps.spherical_harmonics(self.lmax_pos)
         self.attr_irreps = attr_irreps
+        print('Determined attr irrep type:', self.attr_irreps)
 
-        node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, False)  # True: copies of sh
+        node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, False, lmax=self.lmax_h)  # True: copies of sh
 
         # Network for computing the node attributes
         self.node_attribute_net = NodeAttributeNetwork()
