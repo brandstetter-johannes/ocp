@@ -4,11 +4,11 @@ includes:
 
 model:
 #  name: segnn
-  name: segnn2
+  name: segnn3
   in_features: 9
   out_features: 1
   hidden_features: 256
-  N: 7
+  N: 5
   dim: 3
   lmax_h: 1
   lmax_pos: 1

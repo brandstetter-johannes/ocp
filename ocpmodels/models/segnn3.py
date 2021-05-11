@@ -8,7 +8,7 @@ import torch
 from collections import OrderedDict
 from torch import nn
 from torch_scatter import scatter
-from torch_geometric.nn import MessagePassing, global_mean_pool, global_max_pool
+from torch_geometric.nn import MessagePassing, global_mean_pool
 from torch_geometric.nn.inits import glorot_orthogonal
 from torch_geometric.utils import remove_isolated_nodes
 from e3nn.o3 import Irreps
@@ -16,7 +16,7 @@ from e3nn.o3 import Linear, spherical_harmonics, FullyConnectedTensorProduct
 from e3nn.nn import Gate, BatchNorm
 
 from ocpmodels.common.registry import registry
-from ocpmodels.datasets.embeddings import CONTINUOUS_EMBEDDINGS
+from ocpmodels.datasets.embeddings import CONTINUOUS_EMBEDDINGS, ATOMIC_RADII
 from ocpmodels.models.base import BaseModel
 from ocpmodels.common.utils import (
     conditional_grad,
@@ -38,113 +38,6 @@ class Swish(nn.Module):
         return x * torch.sigmoid(self.beta*x)
 
 
-class InstanceNorm(nn.Module):
-    '''Batch normalization for orthonormal representations
-    It normalizes by the norm of the representations.
-    Note that the norm is invariant only for orthonormal representations.
-    Irreducible representations `wigner_D` are orthonormal.
-    Parameters
-    ----------
-    irreps : `Irreps`
-        representation
-    eps : float
-        avoid division by zero when we normalize by the variance
-    momentum : float
-        momentum of the running average
-    affine : bool
-        do we have weight and bias parameters
-    reduce : {'mean', 'max'}
-        method used to reduce
-    '''
-    def __init__(self, irreps, eps=1e-5, reduce='mean', normalization='component'):
-        super().__init__()
-
-        self.irreps = Irreps(irreps)
-        self.eps = eps
-
-        num_scalar = sum(mul for mul, ir in self.irreps if ir.l == 0)
-        num_features = self.irreps.num_irreps
-
-        self.register_parameter('weight', None)
-        self.register_parameter('bias', None)
-
-        assert isinstance(reduce, str), "reduce should be passed as a string value"
-        assert reduce in ['mean', 'max'], "reduce needs to be 'mean' or 'max'"
-        self.reduce = reduce
-
-        assert normalization in ['norm', 'component'], "normalization needs to be 'norm' or 'component'"
-        self.normalization = normalization
-
-    def __repr__(self):
-        return f"{self.__class__.__name__} ({self.irreps}, eps={self.eps}, momentum={self.momentum})"
-
-    def forward(self, input, batch):
-        '''evaluate
-        Parameters
-        ----------
-        input : `torch.Tensor`
-            tensor of shape ``(batch, ..., irreps.dim)``
-        Returns
-        -------
-        `torch.Tensor`
-            tensor of shape ``(batch, ..., irreps.dim)``
-        '''
-        # batch, *size, dim = input.shape  # TODO: deal with batch
-        # input = input.reshape(batch, -1, dim)  # [batch, sample, stacked features]
-        # input has shape [batch * nodes, dim], but with variable nr of nodes.
-        # the input batch slices this into separate graphs
-        dim = input.shape[-1]
-
-        fields = []
-        ix = 0
-
-        for mul, ir in self.irreps:  # mul is the multiplicity (number of copies) of some irrep type (ir)
-            d = ir.dim
-            field = input[:, ix: ix + mul * d]  # [batch * sample, mul * repr]
-            ix += mul * d
-
-            # [batch * sample, mul, repr]
-            field = field.reshape(-1, mul, d)
-
-            # For scalars first compute and subtract the mean
-            if ir.l == 0:
-                # Compute the mean
-                field_mean = global_mean_pool(field, batch).reshape(-1, mul, 1)  # [batch, mul, 1]]
-                # Subtract the mean
-                field = field - field_mean[batch]
-
-            # Then compute the rescaling factor (norm of each feature vector)
-            # Rescaling of the norms themselves based on the option "normalization"
-            if self.normalization == 'norm':
-                field_norm = field.pow(2).sum(-1)  # [batch * sample, mul]
-            elif self.normalization == 'component':
-                field_norm = field.pow(2).mean(-1)  # [batch * sample, mul]
-            else:
-                raise ValueError("Invalid normalization option {}".format(self.normalization))
-            # Reduction method
-            if self.reduce == 'mean':
-                field_norm = global_mean_pool(field_norm, batch)  # [batch, mul]
-            elif self.reduce == 'max':
-                field_norm = global_max_pool(field_norm, batch)  # [batch, mul]
-            else:
-                raise ValueError("Invalid reduce option {}".format(self.reduce))
-
-            # Then apply the rescaling (divide by the sqrt of the squared_norm, i.e., divide by the norm
-            field_norm = (field_norm + self.eps).pow(-0.5)  # [batch, mul]
-            field = field * field_norm[batch].reshape(-1, mul, 1)
-
-            # Save the result, to be stacked later with the rest
-            fields.append(field.reshape(-1, mul * d))  # [batch * sample, mul * repr]
-
-        if ix != dim:
-            fmt = "`ix` should have reached input.size(-1) ({}), but it ended at {}"
-            msg = fmt.format(dim, ix)
-            raise AssertionError(msg)
-
-        output = torch.cat(fields, dim=-1)  # [batch * sample, stacked features]
-        return output
-
-
 class SEGNN(MessagePassing):
     """
         Computes the node and edge attributes based on relative positions
@@ -158,7 +51,7 @@ class SEGNN(MessagePassing):
         self.recurrent = recurrent
 
         # The message network layers
-        irreps_message_in = (node_in_irreps + node_in_irreps + Irreps("1x0e")).simplify()
+        irreps_message_in = (node_in_irreps + node_in_irreps + Irreps("4x0e")).simplify()
         self.message_layer_1 = O3TensorProductSwishGate(irreps_message_in,
                                                         node_hidden_irreps,
                                                         attr_irreps)
@@ -180,20 +73,23 @@ class SEGNN(MessagePassing):
             self.pos_update_layer_1 = None  # O3TensorProductSwishGate
             self.pos_update_layer_2 = None  # O3TensorProduct
 
-        self.norm = InstanceNorm(node_out_irreps)
+        # self.feature_norm = BatchNorm(node_out_irreps)
+        # self.message_norm = BatchNorm(node_out_irreps)
 
 
-    def forward(self, x, pos, edge_index, edge_dist, edge_attr, node_attr, batch):
+    def forward(self, x, pos, edge_index, edge_dist, edge_dist_radii_1, edge_dist_radii_2, edge_dist_radii_12, edge_attr, node_attr):
         """ Propagate messages along edges """
-        x, pos = self.propagate(edge_index, x=x, pos=pos, edge_dist=edge_dist, node_attr=node_attr, edge_attr=edge_attr) # TODO: continue here!
-        x = self.norm(x, batch)  # TODO: Currently disabled
+        x, pos = self.propagate(edge_index, x=x, pos=pos, edge_dist=edge_dist,
+                                edge_dist_radii_1=edge_dist_radii_1, edge_dist_radii_2=edge_dist_radii_2, edge_dist_radii_12=edge_dist_radii_12,
+                                node_attr=node_attr, edge_attr=edge_attr) # TODO: continue here!
+        # x = self.feature_norm(x)
         return x, pos
 
-    def message(self, x_i, x_j, edge_dist, edge_attr):
+    def message(self, x_i, x_j, edge_dist, edge_dist_radii_1, edge_dist_radii_2, edge_dist_radii_12, edge_attr):
         """ Message according to eqs 3-4 in the paper """
-        message = self.message_layer_1(torch.cat((x_i, x_j, edge_dist), dim=-1), edge_attr)
+        message = self.message_layer_1(torch.cat((x_i, x_j, edge_dist, edge_dist_radii_1, edge_dist_radii_2, edge_dist_radii_12), dim=-1), edge_attr)
         message = self.message_layer_2(message, edge_attr)
-        # TODO: position update currently not implemented
+        # message = self.message_norm(message)
         if self.update_pos:
             pos_message = None
         return message
@@ -259,7 +155,7 @@ def BalancedIrreps(lmax, vec_dim, sh_type = True):
         str_out += ' + '
     str_out = str_out[:-3]
     # Generate the irrep
-    print('Determined irrep type:', str_out)
+    #print('Determined irrep type:', str_out)
     return Irreps(str_out)
 
 def WeightBalancedIrreps(irreps_in1_scalar, irreps_in2, sh = True):
@@ -443,7 +339,7 @@ class SEGNNModel(torch.nn.Module):
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
-        node_hidden_irreps = BalancedIrreps(self.lmax_h, self.hidden_features)  # This is the type on the hidden reps
+        #node_hidden_irreps = BalancedIrreps(self.lmax_h, self.hidden_features)  # This is the type on the hidden reps
         node_hidden_irreps_scalar = Irreps("{0}x0e".format(self.hidden_features))  # For the output layers
         node_out_irreps_scalar = Irreps("{0}x0e".format(self.out_features))  # This is the type on the output
 
@@ -451,7 +347,7 @@ class SEGNNModel(torch.nn.Module):
         attr_irreps = Irreps.spherical_harmonics(self.lmax_pos)
         self.attr_irreps = attr_irreps
 
-        #node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, True)  # True: copies of sh
+        node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, False)  # True: copies of sh
 
         # Network for computing the node attributes
         self.node_attribute_net = NodeAttributeNetwork()
@@ -460,7 +356,10 @@ class SEGNNModel(torch.nn.Module):
         self.embedding_layer_1 = O3TensorProductSwishGate(node_in_irreps_scalar,  # in
                                                           node_hidden_irreps,  # out
                                                           attr_irreps)  # steerable attribute
-        self.embedding_layer_2 = O3TensorProduct(node_hidden_irreps,  # in
+        self.embedding_layer_2 = O3TensorProductSwishGate(node_hidden_irreps,  # in
+                                                          node_hidden_irreps,  # out
+                                                          attr_irreps)  # steerable attribute
+        self.embedding_layer_3 = O3TensorProduct(node_hidden_irreps,  # in
                                                  node_hidden_irreps,  # out
                                                  attr_irreps)  # steerable attribute
 
@@ -501,6 +400,13 @@ class SEGNNModel(torch.nn.Module):
         atom_map = (atom_map - atom_map_min.view(1, -1)) / atom_map_gap.view(1, -1)
         self.atom_map = torch.nn.Parameter(atom_map, requires_grad=False)
 
+        # read atom radii
+        atom_radii = torch.zeros(101)
+        for i in range(101):
+            atom_radii[i] = ATOMIC_RADII[i]
+        atom_radii = atom_radii / 100
+        self.atom_radii = nn.Parameter(atom_radii, requires_grad=False)
+
 
     @conditional_grad(torch.enable_grad())
     def _forward(self, data):
@@ -535,6 +441,12 @@ class SEGNNModel(torch.nn.Module):
         # construct the node and edge attributes
         rel_pos = (pos[edge_index[0]] - pos[edge_index[1]]) + cell_offsets
         edge_dist = rel_pos.pow(2).sum(-1, keepdims=True)
+
+        edge_dist_radii_1 = edge_dist - self.atom_radii[data.atomic_numbers.long()[edge_index[0]]][:, None]
+        edge_dist_radii_2 = edge_dist - self.atom_radii[data.atomic_numbers.long()[edge_index[1]]][:, None]
+        edge_dist_radii_12 = edge_dist - self.atom_radii[data.atomic_numbers.long()[edge_index[0]]][:, None] - self.atom_radii[
+            data.atomic_numbers.long()[edge_index[1]]][:, None]
+
         edge_attr = spherical_harmonics(self.attr_irreps, rel_pos, normalize=True, normalization='component')
         node_attr = self.node_attribute_net(edge_index, edge_attr)
         if (data.contains_isolated_nodes() and edge_index.max().item() + 1 != data.num_nodes):
@@ -547,10 +459,11 @@ class SEGNNModel(torch.nn.Module):
         x = self.atom_map[data.atomic_numbers.long()]
         x = self.embedding_layer_1(x, node_attr)
         x = self.embedding_layer_2(x, node_attr)
+        x = self.embedding_layer_3(x, node_attr)
 
         # The main layers
         for layer in self.layers:
-            x, pos = layer(x, pos, edge_index, edge_dist, edge_attr, node_attr, batch)
+            x, pos = layer(x, pos, edge_index, edge_dist, edge_dist_radii_1, edge_dist_radii_2, edge_dist_radii_12, edge_attr, node_attr)
 
         # Output head
         x = self.head_pre_pool_layer_1(x, node_attr)
