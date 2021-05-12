@@ -44,11 +44,12 @@ class SEGNN(MessagePassing):
     """
 
     def __init__(self, node_in_irreps, node_hidden_irreps, node_out_irreps, attr_irreps, update_pos=False,
-                 recurrent=True):
+                 recurrent=True, infer_edges=False):
         super(SEGNN, self).__init__(node_dim=-2, aggr="add")
 
         self.update_pos = update_pos
         self.recurrent = recurrent
+        self.infer_edges = infer_edges
 
         # The message network layers
         irreps_message_in = (node_in_irreps + node_in_irreps + Irreps("1x0e")).simplify()
@@ -73,6 +74,10 @@ class SEGNN(MessagePassing):
             self.pos_update_layer_1 = None  # O3TensorProductSwishGate
             self.pos_update_layer_2 = None  # O3TensorProduct
 
+        if self.infer_edges:
+            self.inf_net_1 = O3TensorProduct(node_hidden_irreps, Irreps("1x0e"), attr_irreps)
+            self.inf_net_2 = nn.Sigmoid()
+
         # self.feature_norm = BatchNorm(node_out_irreps)
         # self.message_norm = BatchNorm(node_out_irreps)
 
@@ -90,6 +95,9 @@ class SEGNN(MessagePassing):
         # message = self.message_norm(message)
         if self.update_pos:
             pos_message = None
+        if self.infer_edges:
+            message = self.inf_net_2(self.inf_net_1(message, edge_attr)) * message
+
         return message
 
     def update(self, message, x, pos, node_attr):
@@ -316,6 +324,7 @@ class SEGNNModel(torch.nn.Module):
         lmax_h=2,
         lmax_pos=None,
         update_pos=False,
+        infer_edges=False,
         recurrent=True,
         regress_forces=False,
         use_pbc=True,
@@ -337,6 +346,7 @@ class SEGNNModel(torch.nn.Module):
         self.lmax_pos = lmax_pos
         if(lmax_pos == None):
             self.lmax_pos = self.lmax_h
+        self.infer_edges = infer_edges
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
@@ -372,7 +382,9 @@ class SEGNNModel(torch.nn.Module):
                                      node_hidden_irreps,  # hidden
                                      node_hidden_irreps,  # out
                                      attr_irreps,  # steerable attribute
-                                     update_pos=self.update_pos, recurrent=self.recurrent))
+                                     update_pos=self.update_pos,
+                                     recurrent=self.recurrent,
+                                     infer_edges=self.infer_edges))
         self.layers = nn.ModuleList(self.layers)
 
         # The output network (again via point-wise operation via scalar irreps)

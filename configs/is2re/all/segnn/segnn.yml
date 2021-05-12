@@ -8,12 +8,13 @@ model:
   in_features: 9
   out_features: 1
   hidden_features: 256
-  N: 5
+  N: 6
   dim: 3
   lmax_h: 1
-  lmax_pos: 3
+  lmax_pos: 1
   update_pos: False
   recurrent: True
+  infer_edges: True
 
 optim:
   batch_size: 2
