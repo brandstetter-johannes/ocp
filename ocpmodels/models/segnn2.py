@@ -44,12 +44,13 @@ class SEGNN(MessagePassing):
     """
 
     def __init__(self, node_in_irreps, node_hidden_irreps, node_out_irreps, attr_irreps, update_pos=False,
-                 recurrent=True, infer_edges=False):
+                 recurrent=True, infer_edges=False, edge_weight=False):
         super(SEGNN, self).__init__(node_dim=-2, aggr="add")
 
         self.update_pos = update_pos
         self.recurrent = recurrent
         self.infer_edges = infer_edges
+        self.edge_weight = edge_weight
 
         # The message network layers
         irreps_message_in = (node_in_irreps + node_in_irreps + Irreps("1x0e")).simplify()
@@ -97,6 +98,9 @@ class SEGNN(MessagePassing):
             pos_message = None
         if self.infer_edges:
             message = self.inf_net_2(self.inf_net_1(message, edge_attr)) * message
+        if self.edge_weight:
+            edge_weight = torch.cos(0.5 * torch.sqrt(edge_dist) * 3.14 / 6.)
+            message = message * edge_weight.view(-1, 1)
 
         return message
 
@@ -325,6 +329,7 @@ class SEGNNModel(torch.nn.Module):
         lmax_pos=None,
         update_pos=False,
         infer_edges=False,
+        edge_weight=False,
         recurrent=True,
         regress_forces=False,
         use_pbc=True,
@@ -347,6 +352,7 @@ class SEGNNModel(torch.nn.Module):
         if(lmax_pos == None):
             self.lmax_pos = self.lmax_h
         self.infer_edges = infer_edges
+        self.edge_weight = edge_weight
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
@@ -384,7 +390,8 @@ class SEGNNModel(torch.nn.Module):
                                      attr_irreps,  # steerable attribute
                                      update_pos=self.update_pos,
                                      recurrent=self.recurrent,
-                                     infer_edges=self.infer_edges))
+                                     infer_edges=self.infer_edges,
+                                     edge_weight=self.edge_weight))
         self.layers = nn.ModuleList(self.layers)
 
         # The output network (again via point-wise operation via scalar irreps)

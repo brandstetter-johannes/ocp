@@ -14,7 +14,8 @@ model:
   lmax_pos: 1
   update_pos: False
   recurrent: True
-  infer_edges: True
+  infer_edges: False
+  edge_weight: True
 
 optim:
   batch_size: 2
