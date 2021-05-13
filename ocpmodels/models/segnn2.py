@@ -123,16 +123,20 @@ class NodeAttributeNetwork(MessagePassing):
         Computes the node and edge attributes based on relative positions
     """
 
-    def __init__(self):
+    def __init__(self, attribute_weight=False):
         super(NodeAttributeNetwork, self).__init__(node_dim=-2, aggr="mean")  # <---- Mean of all edge features
+        self.attribute_weight=attribute_weight
 
-    def forward(self, edge_index, edge_attr):
+    def forward(self, edge_index, edge_attr, edge_dist):
         """ Simply sums the edge attributes """
-        node_attr = self.propagate(edge_index, edge_attr=edge_attr) # TODO: continue here!
+        node_attr = self.propagate(edge_index, edge_attr=edge_attr, edge_dist=edge_dist) # TODO: continue here!
         return node_attr
 
-    def message(self, edge_attr):
+    def message(self, edge_attr, edge_dist):
         """ The message is the edge attribute """
+        if(self.attribute_weight):
+            edge_weight = torch.cos(0.5 * torch.sqrt(edge_dist) * 3.14 / 6.)
+            edge_attr = edge_attr * edge_weight.view(-1, 1)
         return edge_attr
 
     def update(self, node_attr):
@@ -330,6 +334,7 @@ class SEGNNModel(torch.nn.Module):
         update_pos=False,
         infer_edges=False,
         edge_weight=False,
+        attribute_weight=False,
         recurrent=True,
         regress_forces=False,
         use_pbc=True,
@@ -353,6 +358,7 @@ class SEGNNModel(torch.nn.Module):
             self.lmax_pos = self.lmax_h
         self.infer_edges = infer_edges
         self.edge_weight = edge_weight
+        self.attribute_weight = attribute_weight
 
         # Irreps for the node features
         node_in_irreps_scalar = Irreps("{0}x0e".format(self.in_features))  # This is the type of the input
@@ -368,7 +374,7 @@ class SEGNNModel(torch.nn.Module):
         node_hidden_irreps = WeightBalancedIrreps(node_hidden_irreps_scalar, attr_irreps, False, lmax=self.lmax_h)  # True: copies of sh
 
         # Network for computing the node attributes
-        self.node_attribute_net = NodeAttributeNetwork()
+        self.node_attribute_net = NodeAttributeNetwork(attribute_weight=self.attribute_weight)
 
         # The embedding layer (acts point-wise, no orientation information so only use trivial/scalar irreps)
         self.embedding_layer_1 = O3TensorProductSwishGate(node_in_irreps_scalar,  # in
@@ -456,7 +462,7 @@ class SEGNNModel(torch.nn.Module):
         rel_pos = (pos[edge_index[0]] - pos[edge_index[1]]) + cell_offsets
         edge_dist = rel_pos.pow(2).sum(-1, keepdims=True)
         edge_attr = spherical_harmonics(self.attr_irreps, rel_pos, normalize=True, normalization='component')
-        node_attr = self.node_attribute_net(edge_index, edge_attr)
+        node_attr = self.node_attribute_net(edge_index, edge_attr, edge_dist)
         if (data.contains_isolated_nodes() and edge_index.max().item() + 1 != data.num_nodes):
             nr_add_attr = data.num_nodes - (edge_index.max().item() + 1)
             add_attr = node_attr.new_tensor(np.tile(np.eye(node_attr.shape[-1])[0,:], (nr_add_attr,1)))

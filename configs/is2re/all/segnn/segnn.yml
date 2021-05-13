@@ -15,7 +15,8 @@ model:
   update_pos: False
   recurrent: True
   infer_edges: False
-  edge_weight: True
+  edge_weight: False
+  attribute_weight: True
 
 optim:
   batch_size: 2
