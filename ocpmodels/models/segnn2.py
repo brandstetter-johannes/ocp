@@ -428,10 +428,14 @@ class SEGNNModel(torch.nn.Module):
         atom_map = (atom_map - atom_map_min.view(1, -1)) / atom_map_gap.view(1, -1)
         self.atom_map = torch.nn.Parameter(atom_map, requires_grad=False)
         '''
+        '''
         khot_embedding = torch.zeros(100, 92)
         for i in range(100):
             khot_embedding[i] = torch.tensor(KHOT_EMBEDDINGS[i + 1])
         self.khot_embedding = torch.nn.Parameter(khot_embedding, requires_grad=False)
+        '''
+        self.embedding = nn.Embedding(95, self.in_features)
+        #self.embedding = torch.nn.Parameter(emb, requires_grad=False)
 
     @conditional_grad(torch.enable_grad())
     def _forward(self, data):
@@ -476,7 +480,8 @@ class SEGNNModel(torch.nn.Module):
 
         # node_attr, edge_attr = self.attribute_net(pos, edge_index)
         # x = self.atom_map[data.atomic_numbers.long()]
-        x = self.khot_embedding[data.atomic_numbers.long()]
+        # x = self.khot_embedding[data.atomic_numbers.long()]
+        x = self.embedding(data.atomic_numbers.long())
         x = self.embedding_layer_1(x, node_attr)
         x = self.embedding_layer_2(x, node_attr)
         x = self.embedding_layer_3(x, node_attr)
