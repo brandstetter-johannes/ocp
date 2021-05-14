@@ -5,7 +5,7 @@ includes:
 model:
 #  name: segnn
   name: segnn2
-  in_features: 9
+  in_features: 92
   out_features: 1
   hidden_features: 256
   N: 6

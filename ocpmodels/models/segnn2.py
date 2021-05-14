@@ -16,7 +16,7 @@ from e3nn.o3 import Linear, spherical_harmonics, FullyConnectedTensorProduct
 from e3nn.nn import Gate, BatchNorm
 
 from ocpmodels.common.registry import registry
-from ocpmodels.datasets.embeddings import CONTINUOUS_EMBEDDINGS
+from ocpmodels.datasets.embeddings import CONTINUOUS_EMBEDDINGS, KHOT_EMBEDDINGS
 from ocpmodels.models.base import BaseModel
 from ocpmodels.common.utils import (
     conditional_grad,
@@ -412,6 +412,7 @@ class SEGNNModel(torch.nn.Module):
                                                       node_out_irreps_scalar)  # out
 
 
+        '''
         # read atom map
         atom_map = torch.zeros(101, 9)
         for i in range(101):
@@ -426,7 +427,11 @@ class SEGNNModel(torch.nn.Module):
         # squash to [0,1]
         atom_map = (atom_map - atom_map_min.view(1, -1)) / atom_map_gap.view(1, -1)
         self.atom_map = torch.nn.Parameter(atom_map, requires_grad=False)
-
+        '''
+        khot_embedding = torch.zeros(100, 92)
+        for i in range(100):
+            khot_embedding[i] = torch.tensor(KHOT_EMBEDDINGS[i + 1])
+        self.khot_embedding = torch.nn.Parameter(khot_embedding, requires_grad=False)
 
     @conditional_grad(torch.enable_grad())
     def _forward(self, data):
@@ -470,7 +475,8 @@ class SEGNNModel(torch.nn.Module):
             node_attr = torch.cat((node_attr, add_attr), -2)
 
         # node_attr, edge_attr = self.attribute_net(pos, edge_index)
-        x = self.atom_map[data.atomic_numbers.long()]
+        # x = self.atom_map[data.atomic_numbers.long()]
+        x = self.khot_embedding[data.atomic_numbers.long()]
         x = self.embedding_layer_1(x, node_attr)
         x = self.embedding_layer_2(x, node_attr)
         x = self.embedding_layer_3(x, node_attr)
