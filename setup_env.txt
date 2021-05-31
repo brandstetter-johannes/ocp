@@ -23,7 +23,7 @@ pip install tensorboard
 CUDA_VISIBLE_DEVICES=0,1,2,3 python -u -m torch.distributed.launch --nproc_per_node=4 main.py --distributed --num-gpus 4 --mode train --config-yml configs/is2re/all/segnn/segnn.yml
 
 # running on one GPU
-CUDA_VISIBLE_DEVICES=0 python main.py --config-yml configs/is2re/all/segnn/segnn.yml
+CUDA_VISIBLE_DEVICES=0 python main.py --mode train --config-yml configs/is2re/all/segnn/segnn.yml
 
 # config file
 configs/is2re/all/segnn/segnn.yml

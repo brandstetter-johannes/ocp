@@ -411,7 +411,6 @@ class SEGNNModel(torch.nn.Module):
         self.head_post_pool_layer_2 = O3TensorProduct(node_hidden_irreps_scalar,  # in
                                                       node_out_irreps_scalar)  # out
 
-
         '''
         # read atom map
         atom_map = torch.zeros(101, 9)
@@ -434,8 +433,7 @@ class SEGNNModel(torch.nn.Module):
             khot_embedding[i] = torch.tensor(KHOT_EMBEDDINGS[i + 1])
         self.khot_embedding = torch.nn.Parameter(khot_embedding, requires_grad=False)
         '''
-        self.embedding = nn.Embedding(95, self.in_features)
-        #self.embedding = torch.nn.Parameter(emb, requires_grad=False)
+        self.embedding = nn.Embedding(101, self.in_features)
 
     @conditional_grad(torch.enable_grad())
     def _forward(self, data):
